@@ -2,6 +2,7 @@ package database
 
 import (
 	"log"
+	"project/pkg/errors"
 
 	"github.com/gocql/gocql"
 )
@@ -18,8 +19,18 @@ func SetupCassandraConnection() *CassandraConnection {
 	return &CassandraConnection{session: session}
 }
 
-func (db *CassandraConnection) ExecuteQuery(query string, values ...interface{}) {
-	if err := db.session.Query(query).Bind(values...).Exec(); err != nil {
-		log.Fatal(err)
+func (db *CassandraConnection) ExecuteCreateUser(query string, values ...interface{}) {
+		if err := db.session.Query(query).Bind(values...).Exec(); err != nil {
+			log.Fatal(err)
+		}
+}
+
+func (db *CassandraConnection) ExecuteGetUserByEmail(query string, values ...interface{}) (string, *errors.RestError) {
+	var message string
+	var password string
+	if err := db.session.Query(query).Bind(values...).Scan(&password); err != nil {
+		message = "Invalid username or password"
+		return password, errors.NewBadRequestError(message)
 	}
+	return password, nil
 }
