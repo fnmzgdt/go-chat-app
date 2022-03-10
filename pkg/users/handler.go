@@ -71,9 +71,12 @@ func loginUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 			w.Write(jsonMessage)
 		}
 
-		jsonMessage, _ := json.Marshal(token)
+		expiration := time.Now().Add(365 * 24 * time.Hour)
+        cookie    :=    http.Cookie{Name: "jwtcookie",Value: token,Expires: expiration}
+        http.SetCookie(w, &cookie)
+
+		jsonMessage, _ := json.Marshal("Successful Login")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonMessage)
 	}
 }
-

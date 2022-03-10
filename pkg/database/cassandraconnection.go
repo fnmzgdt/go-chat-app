@@ -3,6 +3,7 @@ package database
 import (
 	"log"
 	"project/pkg/errors"
+	"strconv"
 
 	"github.com/gocql/gocql"
 )
@@ -33,4 +34,19 @@ func (db *CassandraConnection) ExecuteGetUserByEmail(query string, values ...int
 		return password, errors.NewBadRequestError(message)
 	}
 	return password, nil
+}
+
+func (db *CassandraConnection) ExecuteCreateMessage(query string, threadId string, createdAt string, message string, fromId string, toId string, fromUsername string, toUsername string) {
+	threadUUID,_ := gocql.ParseUUID(threadId)
+	 createdAtInt,_ := strconv.Atoi(createdAt)
+	 fromIdInt,_ := strconv.Atoi(fromId)
+	 toIdInt,_ := strconv.Atoi(toId)
+
+	if err := db.session.Query(query).Bind(threadUUID, createdAtInt, message, fromIdInt, toIdInt, fromUsername, toUsername ).Exec(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func (db *CassandraConnection) ExecuteCreateThread(query string, values ...interface{}) {
+
 }
