@@ -1,34 +1,40 @@
 package users
 
-import (
-	"project/pkg/errors"
-)
+import "database/sql"
+
 
 type Repository interface {
-	ExecuteCreateUser(query string, values ...interface{})
-	ExecuteGetUserByEmail(query string, values ...interface{}) (string, *errors.RestError)
+	ExecuteQuery(query string, values ...interface{}) (sql.Result, error)
+	ExecuteGetUserByEmail(query string, values ...interface{}) (string, error)
 }
 
 type Service interface {
-	CreateUser(user *User)
-	GetUserByEmail(user *User) (string, *errors.RestError)
+	CreateUser(user *User) (sql.Result, error)
+	GetUserByEmail(user *User) (string, error)
 }
 
 type service struct {
-	r Repository
+	mysql Repository
 }
 
 func NewService(r Repository) Service {
 	return &service{r}
 }
 
-func (s *service) CreateUser(user *User) {
-	query := `INSERT INTO users(first_name, last_name, email, password) VALUES(?, ?, ?, ?)`
-	s.r.ExecuteCreateUser(query, user.FirstName, user.LastName, user.Email, user.Password)
+func (s *service) CreateUser(user *User) (sql.Result, error) {
+	query := `INSERT INTO users (username, email, password) VALUES(?, ?, ?);`
+	result, err := s.mysql.ExecuteQuery(query, user.Username, user.Email, user.Password)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func (s *service) GetUserByEmail(user *User) (string ,*errors.RestError) {
-	query := `SELECT password FROM users WHERE email=?`
-	password, error := s.r.ExecuteGetUserByEmail(query, user.Email)
-	return password, error
-}
+func (s *service) GetUserByEmail(user *User) (string, error) {
+	query := `SELECT CAST(password AS CHAR) FROM users WHERE email=?;`
+	password, error := s.mysql.ExecuteGetUserByEmail(query, user.Email)
+	if error != nil {
+		return "", error
+	}
+	return password, nil
+} 

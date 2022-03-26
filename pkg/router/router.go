@@ -5,18 +5,22 @@ import (
 	"log"
 	"net/http"
 	"project/pkg/database"
-	"project/pkg/messages"
 	"project/pkg/users"
-
+	"project/pkg/messages"
 	"github.com/go-chi/chi"
 )
 
 func StartServer() *chi.Mux {
 	fmt.Println("Starting server")
+	
+	mysql, err := database.SetupMySQLConnection()
 
-	r := database.SetupCassandraConnection()
-	us := users.NewService(r)
-	ms := messages.NewService(r)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	us := users.NewService(mysql)
+	ms := messages.NewService(mysql)
 
 	router := chi.NewRouter()
 	router.Mount("/api/users", users.UsersRoutes(us))

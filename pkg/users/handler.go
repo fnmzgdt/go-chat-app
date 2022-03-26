@@ -29,12 +29,22 @@ func createUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 	
 		user.Password = string(password[:])
 
-		s.CreateUser(&user)
+		_, err = s.CreateUser(&user)
 
-		fmt.Println("added user to cassandra")
-		json.NewEncoder(w).Encode("added user")
+		if err != nil {
+			fmt.Println(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			jsonMessage, _ := json.Marshal(err)
+			w.Write(jsonMessage)
+			return
+		}
+		
+		jsonMessage, _ := json.Marshal("Successful registration")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonMessage)
 	}
 }
+
 
 func loginUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -44,9 +54,8 @@ func loginUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 		hashedPassword, err := s.GetUserByEmail(&user) 
 		
 		if err != nil {
-			//if there is no such email in the db return 400 invalid username or password
-			jsonMessage, _ := json.Marshal(err)
-			w.WriteHeader(err.Status)
+			jsonMessage, _ := json.Marshal("Invalid username or password")
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write(jsonMessage)
 			return
 		}
@@ -63,10 +72,10 @@ func loginUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: time.Now().Add(time.Hour * 72).Unix(),
 		})
 	
-		token, loginerr := claims.SignedString([]byte("blabla"))
-		if loginerr != nil {
-			fmt.Println(loginerr)
-			w.WriteHeader(http.StatusBadRequest)
+		token, err := claims.SignedString([]byte("blabla"))
+		if err != nil {
+			fmt.Println(err)
+			w.WriteHeader(http.StatusBadGateway)
 			jsonMessage, _ := json.Marshal("Login Failed. Please try again later.")
 			w.Write(jsonMessage)
 		}
@@ -79,4 +88,4 @@ func loginUser(s Service) func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonMessage)
 	}
-}
+} 
