@@ -4,6 +4,8 @@ import "github.com/go-chi/chi"
 
 func MessagesRoutes(s Service) *chi.Mux { 
 	router := chi.NewRouter()
-	router.Post("/post", sendMessageToUser(s))
+	router.Post("/post", sendMessageToThread(s))
+	router.Post("/thread", createGroupThread(s))
+	router.Get("/thread", getMessagesFromThread(s))
 	return router
 } 

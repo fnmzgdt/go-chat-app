@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"project/pkg/messages"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -42,6 +43,7 @@ func (s *MySQLConnection) ExecuteGetUserByEmail(query string, values ...interfac
     }
 	return password, nil
 }
+
 ////////////////////////////
 
 func (s *MySQLConnection) ExecuteGetUserThread(query string, values ...interface{}) (int64, error) {
@@ -52,4 +54,22 @@ func (s *MySQLConnection) ExecuteGetUserThread(query string, values ...interface
         return 0, err
     }
 	return threadId, nil
+}
+
+func (s *MySQLConnection) ExecuteGetMessagesFromThread(query string, threadid int) ([]messages.MessageGet, error) {
+	var messagesArray []messages.MessageGet
+	rows, err := s.db.Query(query, threadid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var message messages.MessageGet
+		err := rows.Scan(&message.Id, &message.ThreadId, &message.FromId, &message.Date, &message.MessageText)
+		if err != nil {
+			fmt.Println(err)
+		}
+		messagesArray = append(messagesArray, message)
+	}
+	return messagesArray, nil
 }
