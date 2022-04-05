@@ -11,12 +11,14 @@ type Service interface {
 	CreateMessage(message *MessagePost) (sql.Result, error)
 	UpdateUserThread(userid int, threadid int, seen uint8) (sql.Result, error)
 	GetMessagesFromThread(threadid int) ([]MessageGet, error)
+	getLatestThreads(userid int) ([]ThreadGet, error)
 }
 
 type Repository interface {
 	ExecuteQuery(query string, values ...interface{}) (sql.Result, error)
 	ExecuteGetUserThread(query string, values ...interface{}) (int64, error)
 	ExecuteGetMessagesFromThread(query string, threadid int) ([]MessageGet, error)
+	ExecuteGetLatestThreads(query string, userid int) ([]ThreadGet, error)
 }
 
 type service struct {
@@ -76,6 +78,15 @@ func (s *service) CreateMessage(message *MessagePost) (sql.Result, error) {
 func (s *service) GetMessagesFromThread(threadid int) ([]MessageGet, error) {
 	query := "SELECT messages.id as messageId, thread_id as threadId, user_id as fromId, UNIX_TIMESTAMP(date) as date, text as messageText FROM messages JOIN users u ON messages.user_id = u.id WHERE thread_id = ? ORDER BY messages.id DESC;"
 	result, err := s.r.ExecuteGetMessagesFromThread(query, threadid)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *service) getLatestThreads(userid int) ([]ThreadGet, error) {
+	query := "SELECT b.`id` AS `id`, b.`name` AS `name`, a.`seen`, d.`username` AS `lastSender`, c.`text` AS `lastMessage`, UNIX_TIMESTAMP(c.`date`) AS `lastUpdated`, b.`type` AS `type`, f.`participants` FROM `users_threads` a JOIN `threads` b ON a.`thread_id` = b.`id` JOIN (SELECT messages.`id`, `thread_id`, `text`, `date`, `user_id` AS `sender_id` FROM messages JOIN (SELECT Max(id) AS `id` FROM messages WHERE thread_id IN (SELECT thread_id FROM users_threads WHERE user_id = ?) GROUP BY thread_id ORDER BY id DESC LIMIT 20) b ON messages.id = b.id) c ON b.`id` = c.`thread_id` JOIN users d ON d.id = c.sender_id JOIN (SELECT thread_id, Group_concat(b.username, '') AS `participants` FROM users_threads a JOIN users b ON a.user_id = b.id WHERE thread_id IN (SELECT thread_id FROM users_threads WHERE user_id = ?) AND user_id != ? GROUP BY thread_id) f ON f.thread_id = a.thread_id WHERE a.`user_id` = ? ORDER BY c.`id` DESC;"
+	result, err := s.r.ExecuteGetLatestThreads(query, userid)
 	if err != nil {
 		return nil, err
 	}

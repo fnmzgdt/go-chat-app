@@ -73,3 +73,21 @@ func (s *MySQLConnection) ExecuteGetMessagesFromThread(query string, threadid in
 	}
 	return messagesArray, nil
 }
+
+func (s *MySQLConnection) ExecuteGetLatestThreads(query string, userid int) ([]messages.ThreadGet, error) {
+	var threadsArray []messages.ThreadGet
+	rows, err := s.db.Query(query, userid, userid, userid, userid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var thread messages.ThreadGet
+		err := rows.Scan(&thread.Id, &thread.Name, &thread.Seen, &thread.LastSender, &thread.LastMessage, &thread.LastUpdated, &thread.Type, &thread.Users)
+		if err != nil {
+			fmt.Println(err)
+		}
+		threadsArray = append(threadsArray, thread)
+	}
+	return threadsArray, nil
+}

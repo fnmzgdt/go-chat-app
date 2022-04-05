@@ -20,7 +20,7 @@ SELECT a.`user_id` AS `user_id`,
        f.`participants`
 FROM   `users_threads` a
        JOIN `threads` b
-         ON a.`thread_id` = b.`id` /* join users_threads and threads so we can get chat room name, id, type */
+         ON a.`thread_id` = b.`id`
        JOIN (SELECT messages.`id`,
                     `thread_id`,
                     `text`,
@@ -31,15 +31,15 @@ FROM   `users_threads` a
                           FROM   messages
                           WHERE  thread_id IN (SELECT thread_id
                                                FROM   users_threads
-                                               WHERE  user_id = ?)  /* gets all threads of the user */
-                          AND id > ?   /* for pagination */                
+                                               WHERE  user_id = ?) 
+                          AND id > ?   
                             GROUP  BY thread_id
                             ORDER BY id DESC
                             LIMIT 20) b
                       ON messages.id = b.id) c 
-         ON b.`id` = c.`thread_id` /* gets the last message sender, text, date*/
+         ON b.`id` = c.`thread_id` 
        JOIN users d
-         ON d.id = c.sender_id /*maps the last message sender id to his user name */
+         ON d.id = c.sender_id 
        JOIN (SELECT thread_id,
                     Group_concat(b.username, "") AS `participants`
              FROM   users_threads a

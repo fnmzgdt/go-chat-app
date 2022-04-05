@@ -8,10 +8,26 @@ import (
 	"time"
 )
 
+func respondWithError(w http.ResponseWriter, code int, message string) {
+    respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+    response, _ := json.Marshal(payload)
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(code)
+    w.Write(response)
+}
+
 func sendMessageToThread(s Service) func(w http.ResponseWriter, r *http.Request) {
 	return func (w http.ResponseWriter, r *http.Request)  {
 		var message MessagePost
 		json.NewDecoder(r.Body).Decode(&message)
+		if err := message.validate(); err != nil {
+			respondWithError(w, http.StatusBadRequest, "Message can't be empty")
+			return
+		}
 		message.Date = time.Now().Unix()
 
 		/*
@@ -67,7 +83,12 @@ func sendMessageToThread(s Service) func(w http.ResponseWriter, r *http.Request)
 		}
 		*/
 		//if there is a thread in the req body
-		s.CreateMessage(&message)
+		err,_ := s.CreateMessage(&message)
+		if err != nil {
+			fmt.Println(err)
+			respondWithError(w, http.StatusBadGateway, "DB error")
+			return
+		}
 
 		//update threads
 		for _, id := range message.Thread.Users{
@@ -79,6 +100,8 @@ func sendMessageToThread(s Service) func(w http.ResponseWriter, r *http.Request)
 			_, err := s.UpdateUserThread(id, message.Thread.Id, seen)
 			if err != nil {
 				fmt.Println(err)
+				respondWithError(w, http.StatusBadGateway, "DB error")
+				return
 			}
 		}
 
@@ -95,13 +118,10 @@ func createGroupThread(s Service) func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&thread)
 		thread.Type = 1
 		thread.CreatedAt = time.Now().Unix()
-		//fmt.Println("this si the thread", thread)
 
 		res, err := s.CreateThread(&thread)
 		if err != nil {
-			jsonMessage, _ := json.Marshal("DB error")
-			w.WriteHeader(http.StatusBadGateway)
-			w.Write(jsonMessage)
+			respondWithError(w, http.StatusBadGateway, "DB error")
 			return
 		}
 		threadid,_ := res.LastInsertId()
@@ -116,6 +136,8 @@ func createGroupThread(s Service) func(w http.ResponseWriter, r *http.Request) {
 			_, err = s.CreateUserThread(id, threadid, thread.CreatedAt, seen)
 			if err != nil {
 				fmt.Println(err)
+				respondWithError(w, http.StatusBadGateway, "DB error")
+				return
 			}
 		}
 
@@ -134,12 +156,14 @@ func getMessagesFromThread(s Service) func(w http.ResponseWriter, r *http.Reques
 		res, err := s.GetMessagesFromThread(threadid)
 		if err != nil {
 			fmt.Println(err)
+			respondWithError(w, http.StatusBadGateway, "DB error")
 			return
 		}
 
 		_, err = s.UpdateUserThread(userid, threadid, 1)
 		if err != nil {
 			fmt.Println(err)
+			respondWithError(w, http.StatusBadGateway, "DB error")
 			return
 		}
 
@@ -148,11 +172,24 @@ func getMessagesFromThread(s Service) func(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusOK)
 		w.Write(response)
 		return
-		//set seen to 1 (for the user)
-
 	}
 }
 
-func getLatestThreads() {
-	//get last updated threads
+func getLatestThreads(s Service) (func(w http.ResponseWriter, r *http.Request)) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userid, _ := strconv.Atoi(r.URL.Query().Get("userid"))
+
+		res, err := s.getLatestThreads(userid)
+		if err != nil {
+			fmt.Println(err)
+			respondWithError(w, http.StatusBadGateway, "DB error")
+			return
+		}
+		
+		response, _ := json.Marshal(res)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(response)
+		return
+	}
 }
