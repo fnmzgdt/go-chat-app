@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"project/pkg/database"
 	"project/pkg/messages"
+	"project/pkg/repository"
 	"project/pkg/users"
 	"project/pkg/websocket"
 
@@ -21,7 +23,16 @@ func StartServer() *chi.Mux {
 		fmt.Println(err)
 	}
 
-	us := users.NewService(mysql)
+	gcb, err := repository.SetupGoogleStorageConnection()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	bucketName := os.Getenv("GC_IMAGE_BUCKET")
+
+	profileImageRepository := repository.NewImageRepository(gcb.Client, bucketName)
+
+	us := users.NewService(mysql, profileImageRepository)
 	ms := messages.NewService(mysql)
 
 	hub := websocket.InitializeNewHub()

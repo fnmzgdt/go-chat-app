@@ -2,21 +2,25 @@ package messages
 
 import (
 	"database/sql"
+	"fmt"
 )
 
 type Service interface {
 	GetUserThread(user1id int, user2id int) (int64, error)
-	CreateThread(thread *Thread) (sql.Result, error)
+	CreateThread(thread *ThreadPost) (sql.Result, error)
 	CreateUserThread(userid int, threadid int64, date int64, seen uint8) (sql.Result, error)
 	CreateMessage(message *MessagePost) (sql.Result, error)
-	UpdateUserThread(userid int, threadid int, seen uint8) (sql.Result, error)
+	GetUsersInThread(threadId int) ([]int, error)
+	UpdateUserThread(userid int, threadId int, userIds []int) (sql.Result, error)
 	GetMessagesFromThread(threadid int) ([]MessageGet, error)
 	getLatestThreads(userid int) ([]ThreadGet, error)
 }
 
 type Repository interface {
 	ExecuteQuery(query string, values ...interface{}) (sql.Result, error)
+	ExecuteUpdateUserThreadQuery(query string, values []int) (sql.Result, error)
 	ExecuteGetUserThread(query string, values ...interface{}) (int64, error)
+	ExecuteGetUsersInThread(query string, threadId int) ([]int, error)
 	ExecuteGetMessagesFromThread(query string, threadid int) ([]MessageGet, error)
 	ExecuteGetLatestThreads(query string, userid int) ([]ThreadGet, error)
 }
@@ -29,6 +33,7 @@ func NewService(r Repository) Service {
 	return &service{r}
 }
 
+//not used anywhere rn
 func (s *service) GetUserThread(user1id int, user2id int) (int64, error) {
 	query := "SELECT ut1.thread_id FROM users_threads ut1 JOIN users_threads ut2 ON ut1.thread_id = ut2.thread_id JOIN threads t ON ut1.thread_id = t.id WHERE  ut1.user_id = ? AND ut2.user_id = ? AND t.type = 0;"
 	result, err := s.r.ExecuteGetUserThread(query, user1id, user2id)
@@ -38,16 +43,17 @@ func (s *service) GetUserThread(user1id int, user2id int) (int64, error) {
 	return result, nil
 }
 
-func (s *service) CreateThread(thread *Thread) (sql.Result, error) {
+func (s *service) CreateThread(thread *ThreadPost) (sql.Result, error) {
 	query := "INSERT INTO threads(name, created_at, type, created_by) VALUES(NULLIF(?, ''), from_unixtime(?), ?, NULLIF(?, 0));"
-	
+
 	result, err := s.r.ExecuteQuery(query, thread.Name, thread.CreatedAt, thread.Type, thread.CreatorId)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
-} 
+}
 
+//not used anywhere rn
 func (s *service) CreateUserThread(userid int, threadid int64, date int64, seen uint8) (sql.Result, error) {
 	query := "INSERT INTO users_threads(user_id, thread_id, added_by, date, seen) VALUES (?, ?, ?, from_unixtime(?), ?);"
 	result, err := s.r.ExecuteQuery(query, userid, threadid, sql.NullInt64{}, date, seen)
@@ -57,18 +63,49 @@ func (s *service) CreateUserThread(userid int, threadid int64, date int64, seen 
 	return result, nil
 }
 
-func (s *service) UpdateUserThread(userid int, threadid int, seen uint8) (sql.Result, error) {
-	query := "UPDATE users_threads SET seen = ? WHERE user_id = ? AND thread_id = ?"
-	result, err := s.r.ExecuteQuery(query, seen, userid, threadid)
+func (s *service) GetUsersInThread(threadId int) ([]int, error) {
+	query := "SELECT user_id FROM users_threads WHERE thread_id = ?;"
+	result, err := s.r.ExecuteGetUsersInThread(query, threadId)
+	if err != nil {
+		return []int{}, err
+	}
+
+	return result, nil
+}
+
+func (s *service) UpdateUserThread(userid int, threadId int, userIds []int) (sql.Result, error) {
+	queryTemplate := "UPDATE users_threads ut JOIN (%s) temp ON temp.id = ut.user_id AND temp.thread_id = ut.thread_id SET ut.seen = temp.seen;"
+	var queryParams []int
+	innerQuery := ""
+	for i, userId := range userIds {
+
+		if i == 0 {
+			innerQuery += "SELECT ? as id, ? as thread_id, ? as seen "
+		} else {
+			innerQuery += "UNION ALL SELECT ?, ?, ? "
+		}
+
+		seen := 0
+		if userIds[i] == userid {
+			seen = 1
+		}
+
+		queryParams = append(queryParams, userId, threadId, seen)
+	}
+
+	query := fmt.Sprintf(queryTemplate, innerQuery)
+
+	result, err := s.r.ExecuteUpdateUserThreadQuery(query, queryParams)
 	if err != nil {
 		return nil, err
 	}
+
 	return result, nil
 }
 
 func (s *service) CreateMessage(message *MessagePost) (sql.Result, error) {
 	query := "INSERT INTO messages(thread_id, user_id, date, text) VALUES (?, ?, from_unixtime(?), ?);"
-	result, err := s.r.ExecuteQuery(query, message.Thread.Id, message.FromId, message.Date, message.MessageText)
+	result, err := s.r.ExecuteQuery(query, message.ThreadId, message.FromId, message.Date, message.MessageText)
 	if err != nil {
 		return nil, err
 	}

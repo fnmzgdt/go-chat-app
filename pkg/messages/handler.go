@@ -4,192 +4,160 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"project/pkg/errors"
 	"strconv"
 	"time"
 )
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
-    respondWithJSON(w, code, map[string]string{"error": message})
-}
-
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-    response, _ := json.Marshal(payload)
-
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(code)
-    w.Write(response)
-}
-
 func sendMessageToThread(s Service) func(w http.ResponseWriter, r *http.Request) {
-	return func (w http.ResponseWriter, r *http.Request)  {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var message MessagePost
-		json.NewDecoder(r.Body).Decode(&message)
+		err := json.NewDecoder(r.Body).Decode(&message)
+		if err != nil {
+			errors.RespondWithError(w, http.StatusInternalServerError, err.Error())
+		}
+
+		senderId, _ := strconv.Atoi(r.URL.Query().Get("userid"))
+		threadId, _ := strconv.Atoi(r.URL.Query().Get("threadid"))
+
+		if senderId == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "userid param missing from request.")
+			return
+		}
+
+		if threadId == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "threadid param missing from request.")
+			return
+		}
+
+		usersInThread, err := s.GetUsersInThread(threadId)
+		if err != nil {
+			errors.RespondWithError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		message.FromId = senderId
+		message.ThreadId = threadId
+		message.Date = int(time.Now().Unix())
+		message.ToUserIds = usersInThread
+
 		if err := message.validate(); err != nil {
-			respondWithError(w, http.StatusBadRequest, "Message can't be empty")
+			errors.RespondWithError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		message.Date = time.Now().Unix()
 
-		/*
-		if message.Thread.Id == 0 {
-			
-			fmt.Println("no thread id in request body")
-			threadId, err := s.GetUserThread(message.FromId, message.ToId)
-			if err != nil {
-				fmt.Println(err)
-			}
-			
-			if threadId == 0 {
-				fmt.Println("thread id doesnt exist between these users")
-				var thread Thread
-				thread.CreatorId = 0
-				thread.Type = 0
-				thread.CreatedAt = message.Date
-				res, err := s.CreateThread(&thread) //passes
-
-				LastInsertId,_ := res.LastInsertId()
-				message.ThreadId = LastInsertId //passes
-
-				//create thread for the user that sends first message
-				_, err = s.CreateUserThread(message.FromId, message.ThreadId, message.Date, 1)
-				if err != nil {
-					fmt.Println(err)
-				}
-
-				//create thread for the user that recieves the first message
-				_, err = s.CreateUserThread(message.ToId, message.ThreadId, message.Date, 0)
-				if err != nil {
-					fmt.Println(err)
-				}
-
-				_, err = s.CreateMessage(&message)
-				if err != nil {
-					fmt.Println(err)
-				}
-				
-				jsonMessage, _ := json.Marshal("Successfuly sent message")
-				w.WriteHeader(http.StatusOK)
-				w.Write(jsonMessage)
-				return
-			} 
-			
-			// if the thread exist assign it to the struct
-			message.ThreadId = threadId
-			s.CreateMessage(&message)
-			jsonMessage, _ := json.Marshal("Successfuly sent message")
-			w.WriteHeader(http.StatusOK)
-			w.Write(jsonMessage)
-			return
-		}
-		*/
-		//if there is a thread in the req body
-		err,_ := s.CreateMessage(&message)
+		_, err = s.CreateMessage(&message)
 		if err != nil {
 			fmt.Println(err)
-			respondWithError(w, http.StatusBadGateway, "DB error")
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
 			return
 		}
 
-		//update threads
-		for _, id := range message.Thread.Users{
-			var seen uint8
-			seen = 0
-			if id == message.FromId {
-				seen = 1
-			}
-			_, err := s.UpdateUserThread(id, message.Thread.Id, seen)
-			if err != nil {
-				fmt.Println(err)
-				respondWithError(w, http.StatusBadGateway, "DB error")
-				return
-			}
+		_, err = s.UpdateUserThread(message.FromId, message.ThreadId, message.ToUserIds) //sets seen = 0 for all other users apart from the sender
+		if err != nil {
+			fmt.Println(err)
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
+			return
 		}
 
-		jsonMessage, _ := json.Marshal("Successfuly sent message")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonMessage)
+		errors.RespondWithJSON(w, http.StatusOK, "message", "Successfuly sent message")
 		return
 	}
 }
 
 func createGroupThread(s Service) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var thread Thread
+		var thread ThreadPost
 		json.NewDecoder(r.Body).Decode(&thread)
+
+		creatorId, _ := strconv.Atoi(r.URL.Query().Get("userid"))
+
+		if creatorId == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "userid param missing from request.")
+			return
+		}
+
 		thread.Type = 1
-		thread.CreatedAt = time.Now().Unix()
+		thread.CreatorId = creatorId
+		thread.CreatedAt = int(time.Now().Unix())
+
+		err := thread.checkFields()
+		if err != nil {
+			errors.RespondWithError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		res, err := s.CreateThread(&thread)
 		if err != nil {
-			respondWithError(w, http.StatusBadGateway, "DB error")
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
 			return
 		}
-		threadid,_ := res.LastInsertId()
+		threadid, _ := res.LastInsertId()
 
-		for _, id := range thread.Users{
-			var seen uint8
-			seen = 0
-			if id == thread.CreatorId {
-				seen = 1
-			}
-		
-			_, err = s.CreateUserThread(id, threadid, thread.CreatedAt, seen)
-			if err != nil {
-				fmt.Println(err)
-				respondWithError(w, http.StatusBadGateway, "DB error")
-				return
-			}
-		}
-
-		jsonMessage, _ := json.Marshal("Successfuly created groupchat")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonMessage)
-		return
-	}
-} 
-
-func getMessagesFromThread(s Service) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		threadid,_ := strconv.Atoi(r.URL.Query().Get("threadid"))
-		userid,_ := strconv.Atoi(r.URL.Query().Get("userid"))
-		//get latest messages in thread
-		res, err := s.GetMessagesFromThread(threadid)
+		_, err = s.UpdateUserThread(thread.CreatorId, int(threadid), thread.Users)
 		if err != nil {
 			fmt.Println(err)
-			respondWithError(w, http.StatusBadGateway, "DB error")
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
 			return
 		}
 
-		_, err = s.UpdateUserThread(userid, threadid, 1)
-		if err != nil {
-			fmt.Println(err)
-			respondWithError(w, http.StatusBadGateway, "DB error")
-			return
-		}
-
-		response, _ := json.Marshal(res)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(response)
+		errors.RespondWithJSON(w, http.StatusOK, "message", "Groupchat successfully created.")
 		return
 	}
 }
 
-func getLatestThreads(s Service) (func(w http.ResponseWriter, r *http.Request)) {
+func getMessagesFromThread(s Service) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		threadid, _ := strconv.Atoi(r.URL.Query().Get("threadid"))
+		userid, _ := strconv.Atoi(r.URL.Query().Get("userid"))
+
+		if threadid == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "threadid param missing from request.")
+			return
+		}
+
+		if userid == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "userid param missing from request.")
+			return
+		}
+
+		res, err := s.GetMessagesFromThread(threadid)
+		if err != nil {
+			fmt.Println(err)
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
+			return
+		}
+
+		_, err = s.UpdateUserThread(userid, threadid, []int{userid})
+		//check rows matched ?? is it possible
+		if err != nil {
+			fmt.Println(err)
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
+			return
+		}
+
+		errors.RespondWithJSON(w, http.StatusOK, "payload", res)
+		return
+	}
+}
+
+func getLatestThreads(s Service) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userid, _ := strconv.Atoi(r.URL.Query().Get("userid"))
+
+		if userid == 0 {
+			errors.RespondWithError(w, http.StatusBadRequest, "userid param missing from request.")
+			return
+		}
 
 		res, err := s.getLatestThreads(userid)
 		if err != nil {
 			fmt.Println(err)
-			respondWithError(w, http.StatusBadGateway, "DB error")
+			errors.RespondWithError(w, http.StatusInternalServerError, "DB error")
 			return
 		}
-		
-		response, _ := json.Marshal(res)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(response)
+
+		errors.RespondWithJSON(w, http.StatusOK, "payload", res)
 		return
 	}
 }
